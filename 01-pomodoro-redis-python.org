@@ -50,7 +50,7 @@ FROM redis
 depois para rodar
 
 #+begin_src bash
-  docker build -t pomodoro-redis
+  docker build -t pomodoro-redis .
   docker run -it -p 6666:6379 pomodoro-redis bash
 #+end_src
 
@@ -63,7 +63,7 @@ Redis -> armazenar os dados
 Typer -> lidar com o usuário
 
 #+begin_src bash
-  pip install typer redis
+  pip install typer
   pip install redis
 #+end_src
 
@@ -165,7 +165,7 @@ Ok, estamos chegando ao final. A primeira coisa que precisamos fazer, é escreve
       data["break_time"] = db.incrby("short_break", 0)
       data["default_time"] = db.incrby("default_time", 0)
 
-      completed_times = db.incry("complted_times", 0)
+      completed_times = db.incrby("completed_times", 0)
       if completed_times and completed_times % 4 == 0:
           data["break_time"] = db.incrby("long_break",0)
           data["fourth_time"] = True
@@ -174,7 +174,7 @@ Ok, estamos chegando ao final. A primeira coisa que precisamos fazer, é escreve
 
 #+end_src
 
-Como o redis vai retornr uma stringÇ
+Como o redis vai retornr uma string:
 
 #+begin_src python
 
