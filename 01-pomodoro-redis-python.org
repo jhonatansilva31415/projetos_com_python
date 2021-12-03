@@ -1,0 +1,360 @@
+Pomodoro com Python
+
+* Introdução
+Meu nome é Jhonatan, trabalho como engenheiro de software, tenho 6 anos de experiência na área de desenvolvimento web e atualmente trabalho em uma empresa da Califórnia.
+* O que nós iremos fazer
+- Implementar um pomodoro
+  -> Trabalhe por 25min,
+    -> Pare por 5min
+      -> Loop 4vezes
+        -> Pare por 15min
+
+Nós iremos criar um pequeno app com python usando =typer= para lidar com os inputs do usuário, também iremos usar =redis= para armazenar os dados
+
+No final teremos algo mais ou menos assim
+
+#+begin_src bash
+  python pomodoro.py start
+  python pomodoro.py stop
+#+end_src
+
+* Análise
+- Queremos persistir os dados?
+- Se queremos persistir, onde iremos guardar? Algumas opções
+  - um arquivo
+  - sqlite
+  - redis
+
+* Requisitos
+
+Para instalar o redis no ubuntu ou distros baseadas no arch
+
+#+begin_src
+  sudo apt install redis-server #ubuntu
+  sudo pacman -S redis #arch based
+#+end_src
+
+Com isso você pode rodar =redis-sever= depois em outro terminal =redis-cli= e deve receber a shell do redis.
+
+Porém nesse tutorial iremos usar o docker em vez de instalar direto na máquina, porém ainda precisará instalar para poder usar a =cli= do redis
+
+** Utilizando docker
+
+Crie um arquivo chamado Dockerfile
+
+#+begin_src dockerfile
+#Dockerfile
+FROM redis
+#+end_src
+
+depois para rodar
+
+#+begin_src bash
+  docker build -t pomodoro-redis
+  docker run -it -p 6666:6379 pomodoro-redis bash
+#+end_src
+
+Você vai ver algo como =root@3626523899cc:/data#=, você pode então usar =redis-server= e em outro terminal rodar =redis-cli=
+
+* Começando
+** Redis & Typer
+
+Redis -> armazenar os dados
+Typer -> lidar com o usuário
+
+#+begin_src bash
+  pip install typer redis
+  pip install redis
+#+end_src
+
+#+begin_src python
+
+  import redis
+  import typer
+
+#+end_src
+
+
+Agora que importamos =redis= & =typer=, podemos criar um app simples
+
+#+begin_src python
+
+  app = typer.Typer()
+
+  @app.command()
+  def test():
+    typer.echo("Funciona!")
+
+  if __name__ == "__main__":
+    app()
+
+#+end_src
+
+Você pode testar rodando =python3 app.py=
+
+Se você criar um outro =@app.command()=, então você vai precisar rodar =python3 app.py func_name=
+
+** Setando os valores no redis
+
+Agora, nós precisamos pegar o input do usuário
+
+1. Tempo padrão do pomodoro
+2. Tempo da pause pequena
+3. Tempo da pausa maior
+
+Para guardar as coisas no redis, primeiro precisamos instanciar a conexão, depois disso podemos adicionar o que quisermos dentro do redis com o =.set=
+
+#+begin_src python
+
+  db = redis.Redis(host="localhost", port=6666, db=0, decode_responses=True)
+  db.set("completed_times", 0)
+
+#+end_src
+
+Com isso, nós se conectamos no redis, =db=0= significa database 0, se você quisesse ter mais apps usando o mesmo redis, poderia usar 1,2,3,4...
+
+Para setar os valores no redis, primeiro precisamos coletar a informação do usuário por meio de inputs, é por isso que estamos usando o typer.
+
+
+Podemos criar um comando chamado =init= para iniciar a configuração da aplicação, poderia chamar essa função de qualquer nome.
+
+#+begin_src python
+
+  def set_redis_values(data):
+      [db.set(key, data[key]) for key in data.keys()]
+
+  @app.command()
+  def init(
+      default_time: int = typer.Option(25, prompt=True),
+      short_break: int = typer.Option(5, prompt=True),
+      long_break: int = typer.Option(15, prompt=True)
+  ) -> None:
+      data = {
+          "default_time": default_time,
+          "short_break": short_break,
+          "long_break": long_break,
+      }
+      create = typer.confirm(f"Are you sure? {data=}")
+      if not create:
+          typer.echo("Not creating")
+          raise typer.Abort()
+      typer.echo("Creating it!")
+      set_redis_values(data)
+
+#+end_src
+
+Para receber um input por meio da cli, podemos usar =typer.Option= ou =typer.Argument=
+
+Argumentos são obrigatórios, enquanto =typer.Options= são opcionais.
+
+** Testando
+
+Bora testar o que temos até agora com =ipdb.set_trace()=
+
+* Lidando com os dados
+
+Ok, estamos chegando ao final. A primeira coisa que precisamos fazer, é escrever uma função para extrair os dados do redis
+
+#+begin_src python
+
+  def get_data() -> dict:
+      data = {
+          "fourth_time":False,
+          "break_time":0,
+      }
+      data["break_time"] = db.incrby("short_break", 0)
+      data["default_time"] = db.incrby("default_time", 0)
+
+      completed_times = db.incry("complted_times", 0)
+      if completed_times and completed_times % 4 == 0:
+          data["break_time"] = db.incrby("long_break",0)
+          data["fourth_time"] = True
+
+      return data
+
+#+end_src
+
+Como o redis vai retornr uma stringÇ
+
+#+begin_src python
+
+  data["default_time"] = db.get("completed_times")
+
+#+end_src
+
+Nós precisaríamos fazer o casting (=int(db.get("completed_times"))=), para todos os valores, em vez disso, podemos usar uma maneira talvez não tão convencional de adicionar 0 ao valor, com isso ele retornará um número em vez de uma string
+
+#+begin_src python
+
+  data["default_time"] = db.incrby("completed_times", 0)
+
+#+end_src
+
+Depois disso, precisamos saber se é a 4 vez para utilizarmos a pausa maior.
+
+É mais ou menos isso o necessário na parte de extrair os dados do redis.
+
+* O app
+
+Agora para a lógica final, a primeira coisa que precisamos fazer é pegar os dados.
+
+#+begin_src python
+
+  @app.command()
+  def start():
+      data = get_data()
+      break_time = data["completed_times"]
+      default_time = data["default_time"]
+
+#+end_src
+
+Podemos usar =time.sleep= para dormir pelo tempo necessário
+
+#+begin_src python
+
+  typer.echo("[*] Started Pomodoro")
+      pomodoro_chunks = [1 for _ in range(default_time)]
+      for t in pomodoro_chunks:
+          time.sleep(60*t)
+          typer.echo("[-] 1min passed")
+
+#+end_src
+
+Depois disso, podemos aumentar =completed_times= com 1 e perguntar se ele quer fazer a pausa
+
+#+begin_src python
+
+  typer.echo("[*] Completed Pomodoro")
+      db.incrby("completed_times", 1)
+      start_rest = typer.confirm("Start rest?")
+      if not start_rest:
+          typer.echo("Exiting")
+          typer.Abort()
+
+#+end_src
+
+Podemos criar uma função para não duplicar o código.
+
+#+begin_src python
+
+  def incremental_sleep(sleep_time: int) -> None:
+      pomodoro_chunks = [1 for _ in range(sleep_time)]
+      for t in pomodoro_chunks:
+          time.sleep(60*t)
+          typer.echo("[-] 1min passed")
+
+#+end_src
+
+Ficando assim no final
+
+#+begin_src python
+
+  @app.command()
+  def start():
+      data = get_data()
+      break_time = data["completed_times"]
+      default_time = data["default_time"]
+
+      typer.echo("[*] Started Pomodoro")
+      incremental_sleep(default_time)
+
+      typer.echo("[*] Completed Pomodoro")
+      db.incrby("completed_times", 1)
+      start_rest = typer.confirm("Start rest?")
+      if not start_rest:
+          typer.echo("Exiting")
+          typer.Abort()
+
+      incremental_sleep(break_time)
+      typer.echo("[*] Session finished!")
+
+#+end_src
+
+* Próximos passos
+
+- Adicionar usuários
+- Tocar efeitos sonoros
+- Adicionar tags
+- Mostrar estatísticas
+- Reiniciar os dados
+- Rodar essa aplicação inteira no docker
+
+* Script
+
+#+begin_src python
+
+  #!/usr/bin/python3
+  import redis
+  import typer
+  import time
+
+  app = typer.Typer()
+  db = redis.Redis(host="localhost", port=6666, db=0, decode_responses=True)
+  db.set("completed_times", 0)
+
+  def set_redis_values(data):
+      [db.set(key, data[key]) for key in data.keys()]
+
+  @app.command()
+  def init(
+      default_time: int = typer.Option(25, prompt=True),
+      short_break: int = typer.Option(5, prompt=True),
+      long_break: int = typer.Option(15, prompt=True)
+  ) -> None:
+      data = {
+          "default_time": default_time,
+          "short_break": short_break,
+          "long_break": long_break,
+      }
+      create = typer.confirm(f"Are you sure? {data=}")
+      if not create:
+          typer.echo("Not creating")
+          raise typer.Abort()
+      typer.echo("Creating it!")
+      set_redis_values(data)
+
+  def get_data() -> dict:
+      data = {
+          "fourth_time":False,
+          "break_time":0,
+      }
+      data["break_time"] = db.incrby("short_break", 0)
+      data["default_time"] = db.incrby("default_time", 0)
+
+      completed_times = db.incrby("completed_times", 0)
+      if completed_times and completed_times % 4 == 0:
+          data["break_time"] = db.incrby("long_break",0)
+          data["fourth_time"] = True
+
+      return data
+
+  def incremental_sleep(sleep_time: int) -> None:
+      pomodoro_chunks = [1 for _ in range(sleep_time)]
+      for t in pomodoro_chunks:
+          time.sleep(60*t)
+          typer.echo("[-] 1min passed")
+
+
+  @app.command()
+  def start():
+      data = get_data()
+      break_time = data["completed_times"]
+      default_time = data["default_time"]
+
+      typer.echo("[*] Started Pomodoro")
+      incremental_sleep(default_time)
+
+      typer.echo("[*] Completed Pomodoro")
+      db.incrby("completed_times", 1)
+      start_rest = typer.confirm("Start rest?")
+      if not start_rest:
+          typer.echo("Exiting")
+          typer.Abort()
+
+      incremental_sleep(break_time)
+      typer.echo("[*] Session finished!")
+
+  if __name__ == "__main__":
+      app()
+
+#+end_src
